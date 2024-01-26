@@ -1,0 +1,124 @@
+---
+- name: "Create a haproxy node"
+  gather_facts: no 
+  hosts: proxies
+  tasks:
+
+    - name: Apt Upgrade
+      apt:
+        update_cache: yes
+        upgrade: yes
+        autoremove: yes
+      become: true
+
+    - name: Reboot Proxies
+      reboot:
+              reboot_timeout: 600
+      become: true
+
+    - name: Install initial packages
+      apt:
+        update_cache: yes
+        state: present
+        name:
+          - software-properties-common
+      become: true
+
+    - name: Add haproxy repo
+      shell: 'add-apt-repository ppa:vbernat/haproxy-2.6 -y'
+      become: true
+
+    - name: Update apt
+      apt:
+        update_cache: yes
+        state: present
+        name:
+          - keepalived
+      become: true
+
+    - name: Install haproxy
+      shell: 'apt install -y haproxy=2.6.\*'
+      become: true
+
+    - name: Create haproxy override directory
+      file:
+        path: '/etc/systemd/system/haproxy.service.d/'
+        state: directory
+        owner: root
+        group: root
+      become: true
+
+    - name: Copy systemd override file
+      copy:
+        src: ./override.conf
+        dest: /etc/systemd/system/haproxy.service.d/override.conf
+        owner: root
+        group: root
+        mode: 0644 
+      become: true
+
+    - name: Configure limits.conf
+      lineinfile:
+        dest: /etc/security/limits.conf
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        state: present
+      with_items:
+        - { regexp: '^\* soft nofile 1000000', line: '* soft nofile 1000000' }
+        - { regexp: '^\* hard nofile 1000000', line: '* hard nofile 1000000' }
+        - { regexp: '^root soft nofile 1000000', line: 'root soft nofile 1000000' }
+        - { regexp: '^root hard nofile 1000000', line: 'root hard nofile 1000000' }
+      become: true
+
+    - name: Configure sysctl.conf
+      lineinfile:
+        dest: /etc/sysctl.conf
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        state: present
+      with_items:
+        - { regexp: '^net.ipv4.tcp_max_syn_backlog = 1000000', line: 'net.ipv4.tcp_max_syn_backlog = 1000000' }
+        - { regexp: '^net.core.somaxconn = 1000000', line: 'net.core.somaxconn = 1000000' }
+        - { regexp: '^net.core.netdev_max_backlog = 1000000', line: 'net.core.netdev_max_backlog = 1000000' }
+        - { regexp: '^net.ipv4.ip_local_port_range=1024 65535', line: 'net.ipv4.ip_local_port_range=1024 65535' }
+        - { regexp: '^net.ipv4.ip_nonlocal_bind=1', line: 'net.ipv4.ip_nonlocal_bind=1' }
+      become: true
+
+    - name: Enable haproxy
+      systemd:
+        state: started
+        name: haproxy
+        daemon_reload: yes
+        enabled: yes
+      become: true
+
+    - name: Copy haproxy config
+      copy:
+        src: ./haproxy.cfg
+        dest: /etc/haproxy/haproxy.cfg
+        owner: root
+        group: root
+        mode: 0644 
+      become: true
+
+    - name: Copy systemd override file
+      copy:
+        src: "./{{ inventory_hostname }}_keepalived.conf"
+        dest: /etc/keepalived/keepalived.conf
+        owner: root
+        group: root
+        mode: 0644 
+      become: true
+
+    - name: Enable haproxy
+      systemd:
+        state: started
+        name: keepalived
+        daemon_reload: yes
+        enabled: yes
+      become: true
+
+    - name: Reboot Proxies
+      reboot:
+              reboot_timeout: 600
+      become: true
